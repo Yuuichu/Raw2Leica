@@ -1,0 +1,3 @@
+include Launch.command
+recursive-include scripts *.py *.sh
+recursive-include docs *.md

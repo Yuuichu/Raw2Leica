@@ -20,6 +20,14 @@
 
 ## 安装与启动
 
+### macOS Apple Silicon 应用包
+
+从 [GitHub Releases](https://github.com/Yuuichu/Raw2Leica/releases) 下载 `RAW2LEICA-0.3.0-macos-arm64.zip`，解压后将 `RAW2LEICA.app` 移入“应用程序”并打开。本次应用构建要求 macOS 26.0+、Apple Silicon。包内包含 Python、Qt、LibRaw 与 ExifTool，无需另装 Python 或 Homebrew；ExifTool 使用系统 `/usr/bin/perl`。未验证 Intel Mac 或 Windows。
+
+应用仅做本地 ad-hoc 签名，没有 Developer ID 签名或 Apple 公证。下载后可能受到 Gatekeeper 拦截；确认来源后，可在系统设置 → 隐私与安全性中允许打开。发布状态与验证边界见 [v0.3.0 发布说明](docs/release-v0.3.0.md)。
+
+### 从源码运行
+
 需要 Python 3.11+（推荐 3.13）、ExifTool，以及项目 Python 依赖。macOS 在项目目录执行：
 
 ```sh
@@ -167,3 +175,15 @@ docs/                 界面截图与验证记录
 当前实现 JPEG 桥接、导出尺寸、逐张裁剪与八项基础调整，DNG 作为输入；**尚未实现 DNG 输出**。不模拟传感器数据、Leica MakerNote、序列号或 C2PA 签名。不应用 Leica Looks 本身。未进行 500 张压力测试或 Windows 打包发布。
 
 开发参考：[rawpy 官方 API](https://letmaik.github.io/rawpy/api/rawpy.RawPy.html)、[ExifTool](https://exiftool.org/)。
+
+## 构建发布包
+
+在 macOS 上完成源码安装后执行：
+
+```sh
+.venv/bin/python -m pip install -e '.[dev,packaging]'
+sh scripts/build_macos.sh
+dist/RAW2LEICA.app/Contents/MacOS/RAW2LEICA --smoke-test
+```
+
+`dist/` 中生成应用 ZIP、Python wheel 和源码 tar.gz。wheel 需要外部 ExifTool；应用 ZIP 已附带 ExifTool 与其许可证。`--smoke-test` 验证打包后的 Qt、LibRaw 模块、机型配置和内置 ExifTool，并完成一张临时 JPEG 的转换及回读。
