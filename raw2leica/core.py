@@ -13,7 +13,7 @@ import tempfile
 import threading
 
 from PIL import Image, ImageCms
-from .imaging import prepare_image, exposure_gain
+from .imaging import prepare_image, exposure_gain, BasicAdjustments
 
 RAW_EXTENSIONS = {".arw", ".sr2", ".srf", ".cr2", ".cr3", ".crw", ".nef", ".nrw",
                   ".raf", ".rw2", ".rwl", ".orf", ".pef", ".ptx", ".3fr", ".fff",
@@ -52,6 +52,7 @@ class Options:
     preserve_gps: bool = True
     lens_mode: str = "compatible"  # compatible / original / remove
     exposure_ev: float = 0.
+    adjustments: BasicAdjustments = BasicAdjustments()
     max_edge: int | None = None  # maximum export edge; never upscale
     crop_box: tuple[float, float, float, float] | None = None  # normalized x0,y0,x1,y1, after orientation
 
@@ -129,9 +130,9 @@ def _orient(image: Image.Image, orientation: int) -> Image.Image:
     return image.transpose(transforms[orientation]) if orientation in transforms else image
 
 
-def develop(source: Path, metadata: dict, exposure_ev: float = 0.) -> Image.Image:
+def develop(source: Path, metadata: dict, exposure_ev: float = 0., adjustments=None) -> Image.Image:
     prepared = prepare_image(source, metadata)
-    return prepared.render(exposure_ev)
+    return prepared.render(exposure_ev, adjustments)
 
 
 def copy_tags(options: Options) -> list[str]:
@@ -249,8 +250,8 @@ def transform_image(image: Image.Image, max_edge: int | None = None,
 
 
 def encode(source: Path, metadata: dict, destination: Path, quality: int,
-           *, max_edge: int | None = None, crop_box=None, exposure_ev=0.):
-    original = develop(source, metadata, exposure_ev)
+           *, max_edge: int | None = None, crop_box=None, exposure_ev=0., adjustments=None):
+    original = develop(source, metadata, exposure_ev, adjustments)
     try:
         image = transform_image(original, max_edge, crop_box)
     finally:
@@ -284,7 +285,7 @@ def export_encoded(source: Path, encoded: Path, source_metadata: dict, options: 
         actual = verify(temp, source_metadata, options, size)
         report = {"source": str(source), "source_camera": source_metadata.get("Model", "未知"),
                   "output": str(output), "target": options.profile.model, "quality": options.quality,
-                  "dimensions": size, "exposure_ev": options.exposure_ev, "develop_pipeline": "linear-srgb-v1", "max_edge": options.max_edge, "crop_box": options.crop_box,
+                  "dimensions": size, "exposure_ev": options.exposure_ev, "basic_adjustments": vars(options.adjustments), "develop_pipeline": "linear-srgb-v2", "max_edge": options.max_edge, "crop_box": options.crop_box,
                   "lens_correction_applied": False, "metadata_verified": True, "fotos_verified": False,
                   "metadata": {k: v for k, v in actual.items() if k != "SourceFile"}}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", prefix=".raw2leica-", dir=folder,
@@ -319,7 +320,7 @@ def convert(source: Path, options: Options, cancel: threading.Event | None = Non
     with tempfile.TemporaryDirectory(prefix="raw2leica-") as folder:
         encoded = Path(folder) / "base.jpg"
         size = encode(source, metadata, encoded, options.quality,
-                      max_edge=options.max_edge, crop_box=options.crop_box, exposure_ev=options.exposure_ev)
+                      max_edge=options.max_edge, crop_box=options.crop_box, exposure_ev=options.exposure_ev, adjustments=options.adjustments)
         check_cancel(cancel)
         progress("写入 JPEG", 65)
         return export_encoded(source, encoded, metadata, options, size, cancel, progress)
@@ -336,7 +337,7 @@ def compatibility_test(source: Path, options: Options, cancel: threading.Event,
     with tempfile.TemporaryDirectory(prefix="raw2leica-test-") as folder:
         encoded = Path(folder) / "base.jpg"
         size = encode(source, metadata, encoded, options.quality,
-                      max_edge=options.max_edge, crop_box=options.crop_box, exposure_ev=options.exposure_ev)
+                      max_edge=options.max_edge, crop_box=options.crop_box, exposure_ev=options.exposure_ev, adjustments=options.adjustments)
         profiles = [p for p in load_profiles() if p.id in {"m11p", "m11", "q3", "q343", "sl3", "mev1"}]
         for index, profile in enumerate(profiles):
             check_cancel(cancel)

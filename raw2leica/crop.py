@@ -14,14 +14,15 @@ from .core import develop, read_metadata, crop_bounds
 class CropPreviewWorker(QThread):
     ready = Signal(bytes, object, str)
 
-    def __init__(self, source: Path, exposure_ev=0.):
+    def __init__(self, source: Path, exposure_ev=0., adjustments=None):
         super().__init__()
         self.source = source
         self.exposure_ev = exposure_ev
+        self.adjustments = adjustments
 
     def run(self):
         try:
-            image = develop(self.source, read_metadata(self.source), self.exposure_ev)
+            image = develop(self.source, read_metadata(self.source), self.exposure_ev, self.adjustments)
             try:
                 original_size = image.size
                 image.thumbnail((1400, 1000))
@@ -181,7 +182,7 @@ class CropCanvas(QWidget):
 
 
 class CropDialog(QDialog):
-    def __init__(self, source, box=None, *, selection_count=1, exposure_ev=0., parent=None):
+    def __init__(self, source, box=None, *, selection_count=1, exposure_ev=0., parent=None, adjustments=None):
         super().__init__(parent)
         self.setWindowTitle(f'裁剪照片 — {source.name}')
         self.resize(960,760)
@@ -216,7 +217,7 @@ class CropDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
         self.canvas.changed.connect(self.describe)
-        self.worker=CropPreviewWorker(source, exposure_ev)
+        self.worker=CropPreviewWorker(source, exposure_ev, adjustments)
         self.worker.ready.connect(self.loaded)
         self.worker.finished.connect(self.worker_finished)
         self.worker.start()

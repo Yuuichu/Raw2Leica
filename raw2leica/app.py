@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QFrame, QLabe
 
 from .crop import CropDialog
 from .exposure import ExposureDialog
+from .imaging import BasicAdjustments
 from . import __version__
 from .core import (Options, SUPPORTED_EXTENSIONS, Cancelled, load_profiles, read_metadata,
                    discover, convert, compatibility_test, find_exiftool, exiftool)
@@ -33,6 +34,7 @@ class Job:
     target: str = ""
     crop_box: tuple[float, float, float, float] | None = None
     exposure_ev: float = 0.
+    adjustments: BasicAdjustments = BasicAdjustments()
 
 
 class ScanWorker(QThread):
@@ -77,14 +79,14 @@ class BatchWorker(QThread):
 
     def run(self):
         done = failed = cancelled = 0
-        for row, source, crop_box, exposure_ev in self.jobs:
+        for row, source, crop_box, exposure_ev, adjustments in self.jobs:
             if self.cancel.is_set():
                 self.result.emit(row, "已取消", [], "")
                 cancelled += 1
                 continue
             try:
                 callback = lambda state, value, r=row: self.update.emit(r, state, value)
-                options = replace(self.options, crop_box=crop_box, exposure_ev=exposure_ev)
+                options = replace(self.options, crop_box=crop_box, exposure_ev=exposure_ev, adjustments=adjustments)
                 if self.test:
                     outputs = compatibility_test(source, options, self.cancel, callback)
                 else:
@@ -662,7 +664,7 @@ class MainWindow(QMainWindow):
             job.target = "6 种机型" if test else options.profile.model
             self.table.item(row, 2).setText(job.target)
             self.table.item(row, 3).setText(job.state)
-        self.worker = BatchWorker([(r, self.jobs[r].source, self.jobs[r].crop_box, self.jobs[r].exposure_ev) for r in rows], options, test)
+        self.worker = BatchWorker([(r, self.jobs[r].source, self.jobs[r].crop_box, self.jobs[r].exposure_ev, self.jobs[r].adjustments) for r in rows], options, test)
         self.worker.update.connect(self.on_progress)
         self.worker.result.connect(self.on_result)
         self.worker.summary.connect(self.on_summary)
@@ -739,13 +741,13 @@ class MainWindow(QMainWindow):
         if not rows:
             return
         job = self.jobs[rows[0]]
-        dialog = ExposureDialog(job.source, job.exposure_ev, job.crop_box, selection_count=len(rows), parent=self)
+        dialog = ExposureDialog(job.source, job.exposure_ev, job.crop_box, selection_count=len(rows), parent=self, adjustments=job.adjustments)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             mode = dialog.batch_mode.currentData()
             affected = rows[:1] if mode == "single" else rows
-            self.apply_exposure(affected, dialog.control.value(), mode=mode, initial=dialog.initial_value)
+            self.apply_exposure(affected, dialog.control.value(), mode=mode, initial=dialog.initial_value, adjustments=dialog.adjustments(), initial_adjustments=dialog.initial_adjustments)
 
-    def apply_exposure(self, rows, value, *, mode="absolute", initial=0.):
+    def apply_exposure(self, rows, value, *, mode="absolute", initial=0., adjustments=None, initial_adjustments=None):
         limited = 0
         for row in rows:
             job = self.jobs[row]
@@ -753,13 +755,21 @@ class MainWindow(QMainWindow):
             adjusted = round(max(-4., min(4., intended)), 2)
             limited += int(abs(adjusted - intended) > .005)
             job.exposure_ev = adjusted
+            if adjustments is not None:
+                before=initial_adjustments or BasicAdjustments()
+                values={}
+                for name,value in vars(adjustments).items():
+                    target=getattr(job.adjustments,name)+value-getattr(before,name) if mode=="relative" else value
+                    limited += int(target < -100 or target > 100)
+                    values[name]=max(-100.,min(100.,target))
+                job.adjustments=BasicAdjustments(**values)
             job.state, job.output, job.error = "等待", None, ""
             self.table.item(row, 3).setText(f"等待 · {adjusted:+.2f} EV")
             self.table.item(row, 3).setForeground(QColor("#7c8274"))
         self._update_counts()
         if self.selected_rows():
             self.show_details(self.selected_rows()[0])
-        self.status.setText(f"已更新 {len(rows)} 张照片的曝光。" + (f"{limited} 张已限制在 ±4 EV 内。" if limited else ""))
+        self.status.setText(f"已更新 {len(rows)} 张照片的基础调整。" + (f"{limited} 项已限制在调整范围内。" if limited else ""))
 
     def edit_crop(self):
         if self.is_busy():
@@ -768,7 +778,7 @@ class MainWindow(QMainWindow):
         if not rows:
             return
         job = self.jobs[rows[0]]
-        dialog = CropDialog(job.source, job.crop_box, selection_count=len(rows), exposure_ev=job.exposure_ev, parent=self)
+        dialog = CropDialog(job.source, job.crop_box, selection_count=len(rows), exposure_ev=job.exposure_ev, parent=self, adjustments=job.adjustments)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             affected = rows if dialog.apply_all.isChecked() else rows[:1]
             self.apply_crop(affected, dialog.crop_box())

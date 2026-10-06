@@ -43,3 +43,20 @@ JPEG：读取 / 应用方向和 ICC → sRGB 反转移到 16 位线性 RGB → �
 - [darktable — Exposure manual](https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/exposure/)
 - [RawTherapee — tonecurve.cc](https://github.com/RawTherapee/RawTherapee/blob/dev/rtgui/tools/tonecurve.cc)
 - [rawpy — Params](https://letmaik.github.io/rawpy/api/rawpy.Params.html)（`exp_shift` 范围 0.25–8，即 −2 到 +3 EV，无法单独覆盖 ±4 EV，因此采用共享线性缓存增益）
+
+## 基础调整扩展（2026-10-07）
+
+Capture One 的基础曝光相关控制分成两个工具：Exposure 的 Exposure、Contrast、Brightness、Saturation，以及 High Dynamic Range 的 Highlight、Shadow、White、Black。本项目已实现对应的 8 个控制，曝光保留 ±4 EV / 0.01 EV，其余使用 −100 至 +100 的独立参数范围。这些范围及公式是本项目设计，不代表 Capture One 引擎或所有滑杆范围。
+
+新增处理顺序：固定基准与曝光线性增益 → 基于线性亮度的色调调整 → 饱和度 → sRGB 编码。亮度使用中间调权重；阴影使用暗部权重；高光正值压低亮部；白色/黑色正值提亮相应色调区域；对比度以线性 0.18 为中心改变曲线；饱和度围绕亮度缩放 RGB 色差。色调调整以共同 RGB 比例保留通道关系，但输出剪裁和饱和度变化仍可能改变色彩。这里的白色/黑色是色调区域控制，不是 Levels 的输入黑白点；真正为零的像素不会凭空生成细节。也没有增加传感器高光重建，早期解码已剪裁的数据仍不能恢复。
+
+零值走原有 LUT 路径，保持未调整行为。非零调整按 128 行分块处理，限制全尺寸导出的临时内存。预览、裁剪预览、常规导出和兼容性测试共享同一参数与公式。队列保存每张照片的全部基础调整；批量绝对模式复制全部值，相对模式逐项添加首张照片的改变量并限制范围。输出 JSON 的 `basic_adjustments` 记录七项新增参数，`exposure_ev` 保持兼容，管线标识为 `linear-srgb-v2`。
+
+侧栏可滚动，提供全项重置、滑块双击归零、数字输入、原图对比及剪裁警告。曝光的 Q 快捷操作仍只改变 EV；其余滑块方向键步长 1，Shift 为 10。原图对比将全部八项归零。
+
+官方资料：
+- [Exposure：四项基本控制](https://support.captureone.com/hc/en-us/articles/360002785697-Exposure)
+- [Brightness：中间调](https://support.captureone.com/hc/en-us/articles/360002609938-Adjusting-brightness-in-the-Exposure-tool)
+- [High Dynamic Range：高光、阴影、白色与黑色](https://support.captureone.com/hc/en-us/articles/360002610558-The-High-Dynamic-Range-tool-overview)
+
+验证：34 项自动测试通过，覆盖色调区域响应、零值一致性、去饱和、数值校验、原图对比、重置、批量相对限制和实际 JPEG / JSON 导出。界面离屏截图已检查，见 `basic-adjustments-dialog.png`；尚未对真实 RAW 场景进行新算法的主观画质评估。

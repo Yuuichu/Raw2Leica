@@ -214,3 +214,57 @@ def test_cancel_during_first_preview_waits_for_loader(tmp_path,monkeypatch):
     wait(app,lambda:not dialog.isVisible())
     assert not dialog.loader.isRunning()
     assert dialog.result()==QDialog.DialogCode.Rejected
+
+
+def test_basic_tonal_regions_saturation_and_neutral():
+    from raw2leica.imaging import BasicAdjustments
+    ramp=np.array([[[2000]*3,[12000]*3,[55000]*3]],dtype=np.uint16)
+    prepared=PreparedImage(ramp,1.,(3,1),True)
+    base=np.asarray(prepared.render())
+    assert np.array_equal(base,np.asarray(prepared.render(0,BasicAdjustments())))
+    highlights=np.asarray(prepared.render(0,BasicAdjustments(highlights=70)))
+    shadows=np.asarray(prepared.render(0,BasicAdjustments(shadows=70)))
+    assert int(base[0,2,0])-int(highlights[0,2,0]) > int(base[0,0,0])-int(highlights[0,0,0])
+    assert int(shadows[0,0,0])-int(base[0,0,0]) > int(shadows[0,2,0])-int(base[0,2,0])
+    colored=PreparedImage(np.array([[[10000,20000,40000]]],dtype=np.uint16),1.,(1,1),False)
+    gray=np.asarray(colored.render(0,BasicAdjustments(saturation=-100)))
+    assert gray[0,0,0]==gray[0,0,1]==gray[0,0,2]
+    for value in [float('nan'),101,-101]:
+        with pytest.raises(ValueError): BasicAdjustments(contrast=value)
+
+
+def test_basic_adjustments_export_and_relative_batch(tmp_path):
+    from raw2leica.imaging import BasicAdjustments
+    app=QApplication.instance() or QApplication([])
+    window=MainWindow(settings=QSettings(str(tmp_path/'s.ini'),QSettings.Format.IniFormat),log_dir=tmp_path/'logs')
+    for name in ['a.jpg','b.jpg']:
+        source=tmp_path/name;Image.new('RGB',(80,60),(60,90,150)).save(source)
+        window.add_job(source,'Test','')
+    window.jobs[1].adjustments=BasicAdjustments(brightness=90)
+    window.apply_exposure([0,1],0,mode='relative',adjustments=BasicAdjustments(brightness=20))
+    assert [j.adjustments.brightness for j in window.jobs]==[20,100]
+    options=Options(load_profiles()[0],output_dir=tmp_path/'out',adjustments=window.jobs[0].adjustments)
+    output=convert(window.jobs[0].source,options)
+    record=json.loads(output.with_suffix('.jpg.json').read_text())
+    assert record['basic_adjustments']['brightness']==20
+    with Image.open(output) as result,Image.open(window.jobs[0].source) as original:
+        assert np.asarray(result).mean()>np.asarray(original).mean()
+    window.close()
+
+
+def test_basic_dialog_controls_comparison_and_reset(tmp_path):
+    from raw2leica.imaging import BasicAdjustments
+    app=QApplication.instance() or QApplication([])
+    source=tmp_path/'photo.jpg';Image.new('RGB',(80,60),(60,90,150)).save(source)
+    dialog=ExposureDialog(source,adjustments=BasicAdjustments(brightness=30));dialog.show()
+    wait(app,lambda:dialog.rendered_token==dialog.token and dialog.viewer.pixmap_data is not None)
+    adjusted=dialog.viewer.pixmap_data.toImage().pixelColor(0,0).red()
+    slider,spin=dialog.tone_controls['brightness']
+    QTest.keyClick(slider,Qt.Key.Key_Right)
+    assert spin.value()==31
+    dialog.compare.setChecked(True)
+    wait(app,lambda:dialog.rendered_token==dialog.token)
+    assert dialog.viewer.pixmap_data.toImage().pixelColor(0,0).red()<adjusted
+    dialog.reset_adjustments()
+    assert not dialog.adjustments().active()
+    dialog.reject();wait(app,lambda:not dialog.isVisible())

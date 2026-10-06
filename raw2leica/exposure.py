@@ -9,9 +9,9 @@ from PIL import Image
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, QPointF
 from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor
 from PySide6.QtWidgets import (QWidget,QDialog,QLabel,QSlider,QDoubleSpinBox,QVBoxLayout,QHBoxLayout,
-                              QPushButton,QCheckBox,QComboBox,QDialogButtonBox)
+                              QPushButton,QCheckBox,QComboBox,QDialogButtonBox,QScrollArea)
 from .core import read_metadata, transform_image
-from .imaging import prepare_image
+from .imaging import prepare_image, BasicAdjustments
 
 
 def step_for(modifiers):
@@ -31,6 +31,7 @@ class EVSlider(QSlider):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.drag_x=None
         self.drag_value=0.
+        self.step_scale=100
 
     def mousePressEvent(self,event):
         if event.button()!=Qt.MouseButton.LeftButton:
@@ -70,7 +71,7 @@ class EVSlider(QSlider):
     def keyPressEvent(self,event):
         if event.key() in (Qt.Key.Key_Up,Qt.Key.Key_Right,Qt.Key.Key_Down,Qt.Key.Key_Left):
             sign=1 if event.key() in (Qt.Key.Key_Up,Qt.Key.Key_Right) else -1
-            self.setValue(self.value()+sign*round(step_for(event.modifiers())*100))
+            self.setValue(self.value()+sign*round(step_for(event.modifiers())*self.step_scale))
             event.accept()
         else:
             super().keyPressEvent(event)
@@ -81,7 +82,7 @@ class EVSlider(QSlider):
             event.ignore()
             return
         delta=event.angleDelta().y()/120 if event.angleDelta().y() else event.pixelDelta().y()/40
-        self.setValue(self.value()+round(delta*step_for(event.modifiers())*100))
+        self.setValue(self.value()+round(delta*step_for(event.modifiers())*self.step_scale))
         event.accept()
 
 
@@ -179,14 +180,15 @@ class RenderWorker(QThread):
     ready=Signal(object)
     failed=Signal(int,str)
 
-    def __init__(self,prepared,ev,crop_box,warnings,token):
+    def __init__(self,prepared,ev,crop_box,warnings,token,adjustments=None):
         super().__init__()
         self.prepared,self.ev,self.crop_box,self.warnings,self.token=prepared,ev,crop_box,warnings,token
+        self.adjustments=adjustments
 
     def run(self):
         try:
             started=time.perf_counter()
-            original=self.prepared.render(self.ev)
+            original=self.prepared.render(self.ev, self.adjustments) if self.adjustments and self.adjustments.active() else self.prepared.render(self.ev)
             image=transform_image(original,crop_box=self.crop_box)
             original.close()
             pixels=np.array(image)
@@ -332,11 +334,12 @@ class ExposureViewer(QLabel):
 
 
 class ExposureDialog(QDialog):
-    def __init__(self,source,value=0.,crop_box=None,*,selection_count=1,parent=None):
+    def __init__(self,source,value=0.,crop_box=None,*,selection_count=1,parent=None,adjustments=None):
         super().__init__(parent)
         self.setWindowTitle(f'曝光调整 — {source.name}')
         self.resize(1160,780)
         self.initial_value=value
+        self.initial_adjustments=adjustments or BasicAdjustments()
         self.prepared=None
         self.crop_box=crop_box
         self.render_worker=None
@@ -356,7 +359,23 @@ class ExposureDialog(QDialog):
         side.addWidget(QLabel('RGB 直方图'))
         self.histogram=Histogram();side.addWidget(self.histogram)
         self.control=ExposureControl(value);side.addWidget(self.control)
-        self.compare=QCheckBox('对比调整前（0.00 EV）')
+        self.tone_controls={}
+        for group, names in [('曝光', [('contrast','对比度'),('brightness','亮度'),('saturation','饱和度')]),
+                             ('动态范围', [('highlights','高光恢复'),('shadows','阴影提亮'),('whites','白色'),('blacks','黑色')])]:
+            side.addWidget(QLabel(group))
+            for name, label in names:
+                head=QHBoxLayout();head.addWidget(QLabel(label));head.addStretch()
+                spin=QDoubleSpinBox();spin.setRange(-100,100);spin.setDecimals(0);spin.setKeyboardTracking(False)
+                spin.setValue(getattr(self.initial_adjustments,name));head.addWidget(spin)
+                slider=EVSlider();slider.step_scale=10;slider.setRange(-100,100);slider.setSingleStep(1);slider.setPageStep(10)
+                slider.setValue(round(spin.value()))
+                slider.valueChanged.connect(spin.setValue)
+                spin.valueChanged.connect(lambda value, control=slider: control.setValue(round(value)))
+                spin.valueChanged.connect(self.request_render)
+                side.addLayout(head);side.addWidget(slider)
+                self.tone_controls[name]=(slider,spin)
+        reset_all=QPushButton('重置全部调整');reset_all.clicked.connect(self.reset_adjustments);side.addWidget(reset_all)
+        self.compare=QCheckBox('对比未调整原图')
         self.warnings=QCheckBox('显示高光 / 阴影剪裁')
         side.addWidget(self.compare);side.addWidget(self.warnings)
         self.clip_info=QLabel('预览剪裁：等待计算');self.clip_info.setWordWrap(True);side.addWidget(self.clip_info)
@@ -370,11 +389,12 @@ class ExposureDialog(QDialog):
             self.batch_mode.addItem(f'{selection_count} 张选中照片统一设值','absolute')
             self.batch_mode.addItem(f'{selection_count} 张选中照片相对增减','relative')
         side.addWidget(self.batch_mode)
-        body.addWidget(panel);layout.addLayout(body,1)
+        scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(panel);scroll.setMinimumWidth(320)
+        body.addWidget(scroll);layout.addLayout(body,1)
         self.status=QLabel('首次开发后缓存线性图像；拖动时直接更新预览。')
         self.status.setWordWrap(True);layout.addWidget(self.status)
         self.buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText('应用曝光')
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText('应用基础调整')
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
         self.buttons.accepted.connect(self.accept);self.buttons.rejected.connect(self.reject)
@@ -390,6 +410,14 @@ class ExposureDialog(QDialog):
         self.loader.ready.connect(self.loaded)
         self.loader.finished.connect(self.finish_or_render)
         self.loader.start()
+
+    def adjustments(self):
+        return BasicAdjustments(**{name:spin.value() for name,(_,spin) in self.tone_controls.items()})
+
+    def reset_adjustments(self):
+        self.control.set_value(0.)
+        for _,spin in self.tone_controls.values():
+            spin.setValue(0.)
 
     def loaded(self,prepared,error):
         if error:
@@ -420,7 +448,8 @@ class ExposureDialog(QDialog):
         if self.token==self.rendered_token:
             return
         ev=0. if self.compare.isChecked() or self.compare_key else self.control.value()
-        self.render_worker=RenderWorker(self.prepared,ev,self.crop_box,self.warnings.isChecked(),self.token)
+        adjustments=BasicAdjustments() if self.compare.isChecked() or self.compare_key else self.adjustments()
+        self.render_worker=RenderWorker(self.prepared,ev,self.crop_box,self.warnings.isChecked(),self.token,adjustments)
         self.render_worker.ready.connect(self.rendered)
         self.render_worker.failed.connect(self.render_failed)
         self.render_worker.finished.connect(self.finish_or_render)
@@ -451,6 +480,8 @@ class ExposureDialog(QDialog):
     def done(self,result):
         # Commit a numeric edit even if Apply is clicked while the field is focused.
         self.control.spin.interpretText()
+        for _,spin in self.tone_controls.values():
+            spin.interpretText()
         busy=self.loader.isRunning() or (self.render_worker and self.render_worker.isRunning())
         self.timer.stop()
         if busy:

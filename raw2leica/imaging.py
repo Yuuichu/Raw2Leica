@@ -36,6 +36,51 @@ def exposure_lut(ev: float, base_gain=1.):
     return np.round(encoded * 255).astype(np.uint8)
 
 
+
+@dataclass(frozen=True)
+class BasicAdjustments:
+    contrast: float = 0.
+    brightness: float = 0.
+    saturation: float = 0.
+    highlights: float = 0.
+    shadows: float = 0.
+    whites: float = 0.
+    blacks: float = 0.
+
+    def __post_init__(self):
+        for name, value in vars(self).items():
+            if not math.isfinite(value) or not -100 <= value <= 100:
+                raise ValueError(f'{name} 必须在 -100 至 +100 之间')
+
+    def active(self):
+        return any(vars(self).values())
+
+
+def adjust_rgb(linear, adjustments):
+    """Independent luminance-weighted tone controls; work before output clipping.
+
+    Positive highlights recovers bright tones; positive shadows opens dark tones.
+    Whites/blacks instead raise their respective endpoints. Saturation uses RGB
+    chroma around luminance. Strip processing in render bounds export memory.
+    """
+    a = adjustments
+    lum = linear @ np.array([.2126, .7152, .0722], dtype=np.float32)
+    t = np.clip(lum, 0., 1.)
+    shadow = (1-t)**3
+    highlight = t**3
+    stops = (a.brightness/100 * 1.5 * 4*t*(1-t)
+             + a.shadows/100 * 2*shadow - a.highlights/100 * 2*highlight
+             + a.whites/100 * highlight + a.blacks/100 * shadow)
+    target = lum * np.exp2(stops)
+    # Smooth contrast about middle gray; zero and true black remain fixed.
+    if a.contrast:
+        target = .18 * np.power(np.maximum(target, 0)/.18, np.exp2(a.contrast/100*.6))
+    ratio = np.divide(target, lum, out=np.ones_like(lum), where=lum>1e-8)
+    rgb = linear * ratio[...,None]
+    if a.saturation:
+        rgb = target[...,None] + (rgb-target[...,None]) * (1+a.saturation/100)
+    return np.clip(rgb, 0., None)
+
 def raw_base_gain(pixels):
     """Freeze a whole-image 99th-percentile reference before crop or adjustment.
 
@@ -80,8 +125,16 @@ class PreparedImage:
     source_size: tuple[int,int]
     is_raw: bool
 
-    def render(self, ev=0.):
-        return Image.fromarray(exposure_lut(ev, self.base_gain)[self.pixels])
+    def render(self, ev=0., adjustments=None):
+        adjustments = adjustments or BasicAdjustments()
+        gain = self.base_gain * exposure_gain(ev)
+        if not adjustments.active():
+            return Image.fromarray(exposure_lut(ev, self.base_gain)[self.pixels])
+        output = np.empty(self.pixels.shape, dtype=np.uint8)
+        for row in range(0, self.pixels.shape[0], 128):
+            linear = self.pixels[row:row+128].astype(np.float32) * (gain/65535.)
+            output[row:row+128] = np.round(linear_to_srgb(adjust_rgb(linear, adjustments))*255).astype(np.uint8)
+        return Image.fromarray(output)
 
 
 def reduce_linear(pixels, max_edge):
