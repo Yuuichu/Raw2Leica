@@ -1,0 +1,18 @@
+[
+  {
+    "output": "/Users/yuui/Documents/Repos/Raw2Leica/outputs/4000px/YUC00574_Leica.jpg",
+    "size": [
+      4000,
+      2667
+    ],
+    "bytes": 7091147
+  },
+  {
+    "output": "/Users/yuui/Documents/Repos/Raw2Leica/outputs/square-3000px/YUC00574_Leica.jpg",
+    "size": [
+      3000,
+      3000
+    ],
+    "bytes": 6028872
+  }
+]

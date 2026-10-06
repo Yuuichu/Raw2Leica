@@ -1,0 +1,50 @@
+{
+  "source": "YUC00574.ARW",
+  "initial_preview_ms": 3563.2153749465942,
+  "cached_preview_size": [
+    1500,
+    1000
+  ],
+  "cached_preview_median_ms": 26.15218749269843,
+  "cached_preview_range_ms": [
+    25.702500017359853,
+    26.807666989043355
+  ],
+  "samples": [
+    {
+      "ev": -1.0,
+      "worker_ms": 28.10237486846745,
+      "clip_text": "预览剪裁：高光 0.05% / 阴影 0.00%\n红色 = 高光；蓝色 = 阴影"
+    },
+    {
+      "ev": 0.0,
+      "worker_ms": 26.730666868388653,
+      "clip_text": "预览剪裁：高光 1.05% / 阴影 0.00%\n红色 = 高光；蓝色 = 阴影"
+    },
+    {
+      "ev": 1.0,
+      "worker_ms": 27.920082909986377,
+      "clip_text": "预览剪裁：高光 14.89% / 阴影 0.00%\n红色 = 高光；蓝色 = 阴影"
+    },
+    {
+      "ev": 0.37,
+      "worker_ms": 29.60325009189546,
+      "clip_text": "预览剪裁：高光 5.30% / 阴影 0.00%\n红色 = 高光；蓝色 = 阴影"
+    }
+  ],
+  "export_ms": 3910.8575829304755,
+  "output": "outputs/exposure-037/YUC00574_Leica_1.jpg",
+  "output_bytes": 7678174,
+  "output_metadata": {
+    "Make": "Leica Camera AG",
+    "Model": "LEICA M11-P",
+    "ImageWidth": 4000,
+    "ImageHeight": 2667,
+    "ISO": 1600,
+    "FNumber": 4,
+    "ExposureTime": 0.01666666667,
+    "ExposureBiasValue": null,
+    "DateTimeOriginal": "2026:10:04 12:57:07",
+    "Orientation": 1
+  }
+}
