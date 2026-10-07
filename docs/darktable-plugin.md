@@ -4,13 +4,15 @@
 
 ## 安装与卸载（macOS）
 
-需要启用 Lua 的 darktable、Python 3.11+ 和 ExifTool。先退出 darktable，在项目目录运行：
+从 [插件 Release](https://github.com/Yuuichu/Raw2Leica/releases/tag/darktable-v0.1.0) 下载 `RAW2LEICA-darktable-0.1.0-macos.zip`，解压后进入其目录。安装包无需桌面应用；包含 Lua、轻量后端、机型配置及安装器，不内置 Python / ExifTool。
+
+需要启用 Lua 的 darktable、Python 3.11+ 和 ExifTool。已有依赖可直接安装；使用 Homebrew 准备依赖的命令为 `brew install python@3.13 exiftool`。先退出 darktable，在解压目录运行：
 
 ```sh
-.venv/bin/python scripts/install_darktable.py
+python3 scripts/install_darktable.py
 ```
 
-也可用符合版本要求的 `python3`。安装器创建包含 Pillow 与 pillow-heif 的独立环境，并复制元数据后端及机型配置，不需要启动 RAW2LEICA 桌面应用。ExifTool 优先使用系统安装，也支持项目 `.tools/exiftool` 副本（包含库与许可证一起复制）。指定其他安装位置：
+若 `python3` 低于 3.11，使用 `"$(brew --prefix python@3.13)/bin/python3.13"` 替代。从仓库安装也可用 `.venv/bin/python`。安装器联网创建包含 Pillow 与 pillow-heif 的独立环境，并复制元数据后端及机型配置，不加载 Qt、rawpy 或桌面图像调整模块。ExifTool 优先使用系统安装，也支持项目 `.tools/exiftool` 副本（包含库与许可证一起复制）。指定其他安装位置：
 
 ```sh
 python3 scripts/install_darktable.py --config-dir /path/to/darktable-config --exiftool /path/to/exiftool

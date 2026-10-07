@@ -1,15 +1,41 @@
 # RAW2LEICA
 
-一个本地桌面照片桥接工具：**RAW / JPEG → 高质量 sRGB JPEG → Leica 身份 EXIF**。
-默认目标身份为 `LEICA M11-P`，可切换其他 Leica 机型，用于在 Leica FOTOS 中测试 Leica Looks。照片在本地处理，原文件保持不变。
+把已编辑的照片写入 Leica 身份 EXIF，在 Leica FOTOS 中使用。提供 **darktable 导出插件**与**独立桌面应用**，默认身份为 `LEICA M11-P`，支持九种 Leica 机型。照片在本地处理，原文件保持不变。
+
+| 使用方式 | 适合场景 | 下载 |
+|---|---|---|
+| **darktable 插件 v0.1.0** | 在 darktable 内完成编辑、镜头矫正和原生导出；JPEG / HEIF，保留 Rec.709 等色彩空间 | [插件 Release](https://github.com/Yuuichu/Raw2Leica/releases/tag/darktable-v0.1.0) |
+| **桌面应用 v0.3.0** | 独立开发 RAW / JPEG，基础调整与裁剪，输出 sRGB JPEG | [桌面 Release](https://github.com/Yuuichu/Raw2Leica/releases/tag/v0.3.0) |
 
 ## darktable 导出插件
 
-也可在 darktable 的 **Leica EXIF** 面板启用后处理，使用原生“磁盘上的文件”目标、路径模板和重名规则导出，由 darktable 负责开发与编辑，插件覆写并校验导出 JPEG/HEIF 的元数据，不重新压缩。macOS 安装与使用见 [插件说明](docs/darktable-plugin.md)。现有桌面应用继续保留。
+在 darktable 的 **Leica EXIF** 面板启用后处理，使用原生“磁盘上的文件”目标、路径模板和重名规则导出。darktable 负责编辑、尺寸、质量与色彩处理，插件覆写并校验 JPEG/HEIF 元数据，**不重新压缩图像**。支持拍摄日期、曝光/焦距、GPS 保留开关和三种镜头规则，每张成片附带 JSON 校验记录。
 
 用户已实测确认 **HEIF + Rec.709 兼容 Leica FOTOS**；具体测试范围见 [验证记录](docs/darktable-validation.md)。
 
-## 功能概览
+### 插件快速安装（macOS）
+
+需要支持 Lua 的 darktable、Python 3.11+ 和 ExifTool。已验证 darktable `5.7.0+1183~gabc10290a7` / Lua API `9.8.0`；其他版本尚未实机验证。
+
+1. 从 [插件 Release](https://github.com/Yuuichu/Raw2Leica/releases/tag/darktable-v0.1.0) 下载 **`RAW2LEICA-darktable-0.1.0-macos.zip`**，解压。
+2. 退出 darktable，在终端进入解压目录，执行：
+
+```sh
+# 已有满足要求的 Python / ExifTool 可跳过第一行
+brew install python@3.13 exiftool
+python3 scripts/install_darktable.py
+```
+
+若 `python3` 低于 3.11，改用 `"$(brew --prefix python@3.13)/bin/python3.13" scripts/install_darktable.py`。安装器联网安装 Pillow / pillow-heif，创建独立后端环境并保留已有 darktable 配置，无需安装桌面应用。
+
+3. 重启 darktable，展开 **Leica EXIF**，设置机型和保留规则，勾选 **启用 Leica EXIF 后处理**。
+4. 原生导出目标选择 **磁盘上的文件**，设置目录、JPEG / HEIF、压缩与配置文件，点击导出。以 Leica 面板计数及 JSON 的 `metadata_verified` 判断校验结果。
+
+更新插件时退出 darktable，重新执行安装命令。卸载：`python3 scripts/install_darktable.py --uninstall`。自定义配置目录、失败处理和完整选项见 [插件说明](docs/darktable-plugin.md)。
+
+插件不直接应用 Looks，也不自动传输手机。建议选择独立输出目录和“创建不重复的文件名”；启用 GPS 时旁边的 JSON 也包含 GPS。
+
+## 桌面应用功能
 
 | 功能 | 当前支持 |
 |---|---|
@@ -28,7 +54,7 @@
 
 ### macOS Apple Silicon 应用包
 
-从 [GitHub Releases](https://github.com/Yuuichu/Raw2Leica/releases) 下载 `RAW2LEICA-0.3.0-macos-arm64.zip`，解压后将 `RAW2LEICA.app` 移入“应用程序”并打开。本次应用构建要求 macOS 26.0+、Apple Silicon。包内包含 Python、Qt、LibRaw 与 ExifTool，无需另装 Python 或 Homebrew；ExifTool 使用系统 `/usr/bin/perl`。未验证 Intel Mac 或 Windows。
+从 [桌面应用 v0.3.0 Release](https://github.com/Yuuichu/Raw2Leica/releases/tag/v0.3.0) 下载 `RAW2LEICA-0.3.0-macos-arm64.zip`，解压后将 `RAW2LEICA.app` 移入“应用程序”并打开。本次应用构建要求 macOS 26.0+、Apple Silicon。包内包含 Python、Qt、LibRaw 与 ExifTool，无需另装 Python 或 Homebrew；ExifTool 使用系统 `/usr/bin/perl`。未验证 Intel Mac 或 Windows。
 
 应用仅做本地 ad-hoc 签名，没有 Developer ID 签名或 Apple 公证。下载后可能受到 Gatekeeper 拦截；确认来源后，可在系统设置 → 隐私与安全性中允许打开。发布状态与验证边界见 [v0.3.0 发布说明](docs/release-v0.3.0.md)。
 
@@ -155,7 +181,12 @@ RAW 使用 16 位线性开发与固定中性亮度基准，再进行调整及 sR
 ## 项目结构
 
 ```text
-raw2leica/core.py      转换、元数据白名单、验证、同图测试
+darktable/raw2leica.lua  原生导出事件与 Leica EXIF 面板
+scripts/install_darktable.py  插件安装、更新与卸载
+raw2leica/metadata.py  桌面 / 插件共用 EXIF 白名单与验证
+raw2leica/exif_export.py  无重新编码的 JPEG / HEIF 后处理
+raw2leica/heif_data.py  HEIF 编码数据及图像属性校验
+raw2leica/core.py      桌面转换与同图测试
 raw2leica/app.py       PySide6 界面和后台任务队列
 raw2leica/exposure.py  基础调整控件、缓存预览、直方图与快捷操作
 raw2leica/imaging.py   预览 / 导出共享线性开发与基础调整
@@ -174,7 +205,7 @@ docs/                 界面截图与验证记录
 .venv/bin/python -m pytest -q
 ```
 
-当前 34 项自动测试通过，覆盖转换、基础调整、批量参数、裁剪及界面流程。历史 RAW 样本验证与新增算法的主观画质评估分开记录。
+当前 97 项自动测试通过，覆盖桌面转换、基础调整、裁剪、界面流程，以及插件 JPEG / HEIF 元数据、色彩信息与编码数据保留。桌面应用 v0.3.0 的历史发布包按当时的 34 项测试验证；新插件不改变已发布的桌面二进制包。插件实测见 [darktable 验证记录](docs/darktable-validation.md)。
 
 接受 ARW / CR3 / CR2 / NEF / RAF / RW2 / ORF / PEF / 3FR / DNG 等扩展名；具体相机是否可解码由当前 LibRaw 决定，不能仅凭扩展名保证支持。实测范围见 [验证记录](docs/validation.md)。
 
@@ -183,6 +214,16 @@ docs/                 界面截图与验证记录
 开发参考：[rawpy 官方 API](https://letmaik.github.io/rawpy/api/rawpy.RawPy.html)、[ExifTool](https://exiftool.org/)。
 
 ## 构建发布包
+
+插件包使用标准库构建，无需 PyInstaller；先提交工作区改动，再执行：
+
+```sh
+python3 scripts/build_darktable.py
+```
+
+生成 `dist/darktable/RAW2LEICA-darktable-0.1.0-macos.zip` 和 `SHA256SUMS.txt`，包内包含源码提交号；不包含桌面依赖、用户照片或本机配置。
+
+桌面应用包：
 
 在 macOS 上完成源码安装后执行：
 
