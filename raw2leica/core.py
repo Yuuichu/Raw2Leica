@@ -8,40 +8,20 @@ import math
 import json
 import os
 import shutil
-import subprocess
 import tempfile
 import threading
 
 from PIL import Image, ImageCms
 from .imaging import prepare_image, exposure_gain, BasicAdjustments
+from .metadata import (Profile, load_profiles, DATE_TAGS, EXPOSURE_TAGS, LENS_TAGS,
+                       find_exiftool, exiftool, read_metadata, copy_tags,
+                       write_metadata, verify, reserve_output)
 
 RAW_EXTENSIONS = {".arw", ".sr2", ".srf", ".cr2", ".cr3", ".crw", ".nef", ".nrw",
                   ".raf", ".rw2", ".rwl", ".orf", ".pef", ".ptx", ".3fr", ".fff",
                   ".iiq", ".srw", ".dng", ".raw", ".mos", ".mrw", ".kdc", ".dcr"}
 JPEG_EXTENSIONS = {".jpg", ".jpeg"}
 SUPPORTED_EXTENSIONS = RAW_EXTENSIONS | JPEG_EXTENSIONS
-DATE_TAGS = ["DateTimeOriginal", "CreateDate", "ModifyDate", "OffsetTime", "OffsetTimeOriginal",
-             "OffsetTimeDigitized", "SubSecTime", "SubSecTimeOriginal", "SubSecTimeDigitized"]
-EXPOSURE_TAGS = ["ExposureTime", "FNumber", "ISO", "ExposureProgram", "ExposureBiasValue",
-                 "MeteringMode", "Flash", "FocalLength", "FocalLengthIn35mmFormat"]
-LENS_TAGS = ["LensModel", "LensInfo"]
-
-
-@dataclass(frozen=True)
-class Profile:
-    id: str
-    display_name: str
-    make: str
-    model: str
-    lens_make: str
-
-
-def load_profiles() -> list[Profile]:
-    profiles = [Profile(**json.loads(p.read_text())) for p in sorted(
-        Path(__file__).with_name("profiles").glob("*.json"))]
-    return sorted(profiles, key=lambda p: (p.id != "m11p", p.display_name))
-
-
 @dataclass(frozen=True)
 class Options:
     profile: Profile
@@ -81,28 +61,6 @@ def check_cancel(cancel: threading.Event):
         raise Cancelled("已取消")
 
 
-def find_exiftool() -> str:
-    candidates = [os.environ.get("EXIFTOOL_PATH"), shutil.which("exiftool"),
-                  "/opt/homebrew/bin/exiftool", "/usr/local/bin/exiftool",
-                  str(Path(__file__).resolve().parents[1] / ".tools/exiftool/bin/exiftool")]
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file():
-            return str(candidate)
-    raise RuntimeError("未找到 ExifTool。macOS 请运行 brew install exiftool；Windows 请将 exiftool.exe 加入 PATH。")
-
-
-def exiftool(*args: str) -> bytes:
-    result = subprocess.run([find_exiftool(), *map(str, args)], capture_output=True, timeout=120)
-    if result.returncode:
-        message = result.stderr.decode("utf-8", "replace").strip()
-        raise RuntimeError(message or "ExifTool 执行失败")
-    return result.stdout
-
-
-def read_metadata(path: Path) -> dict:
-    return json.loads(exiftool("-j", "-n", "-EXIF:all", "-FileType", "-ImageWidth", "-ImageHeight", str(path)))[0]
-
-
 def discover(inputs: list[Path], cancel: threading.Event | None = None) -> list[Path]:
     """Recursive, deterministic discovery without following directory symlinks."""
     found: set[Path] = set()
@@ -133,93 +91,6 @@ def _orient(image: Image.Image, orientation: int) -> Image.Image:
 def develop(source: Path, metadata: dict, exposure_ev: float = 0., adjustments=None) -> Image.Image:
     prepared = prepare_image(source, metadata)
     return prepared.render(exposure_ev, adjustments)
-
-
-def copy_tags(options: Options) -> list[str]:
-    tags = []
-    if options.preserve_date:
-        tags += [f"-EXIF:{t}" for t in DATE_TAGS]
-    if options.preserve_exposure:
-        tags += [f"-EXIF:{t}" for t in EXPOSURE_TAGS]
-    if options.preserve_gps:
-        tags += ["-GPS:all"]
-    if options.lens_mode == "original":
-        tags += [f"-EXIF:{t}" for t in LENS_TAGS]
-    return tags
-
-
-def write_metadata(source: Path, output: Path, options: Options, size: tuple[int, int]):
-    profile = options.profile
-    tags = copy_tags(options)
-    args = ["-overwrite_original"]
-    if tags:
-        args += ["-tagsFromFile", str(source), *tags]
-    args += [f"-EXIF:Make={profile.make}", f"-EXIF:Model={profile.model}",
-             "-EXIF:Orientation#=1", "-EXIF:ColorSpace#=1",
-             f"-EXIF:ExifImageWidth={size[0]}", f"-EXIF:ExifImageHeight={size[1]}"]
-    if options.lens_mode != "remove":
-        args += [f"-EXIF:LensMake={profile.lens_make}"]
-    exiftool(*args, str(output))
-
-
-def verify(output: Path, source_metadata: dict, options: Options, size: tuple[int, int]) -> dict:
-    actual = read_metadata(output)
-    expected = {"Make": options.profile.make, "Model": options.profile.model, "Orientation": 1,
-                "ColorSpace": 1, "ImageWidth": size[0], "ImageHeight": size[1], "FileType": "JPEG"}
-    if options.lens_mode != "remove":
-        expected["LensMake"] = options.profile.lens_make
-    selected = []
-    if options.preserve_date:
-        selected += DATE_TAGS
-    if options.preserve_exposure:
-        selected += EXPOSURE_TAGS
-    if options.lens_mode == "original":
-        selected += LENS_TAGS
-    if options.preserve_gps:
-        selected += [k for k in source_metadata if k.startswith("GPS") and k != "GPSInfo"]
-    for tag in selected:
-        if tag in source_metadata:
-            expected[tag] = source_metadata[tag]
-    mismatches = [f"{key}: {actual.get(key)!r} ≠ {value!r}" for key, value in expected.items()
-                  if actual.get(key) != value]
-    if not options.preserve_date:
-        mismatches += [f"未清除 {t}" for t in DATE_TAGS if t in actual]
-    if not options.preserve_exposure:
-        mismatches += [f"未清除 {t}" for t in EXPOSURE_TAGS if t in actual]
-    if not options.preserve_gps and any(t.startswith("GPS") for t in actual):
-        mismatches.append("未清除 GPS")
-    if options.lens_mode != "original" and any(t in actual for t in LENS_TAGS):
-        mismatches.append("未清除原始镜头型号")
-    if options.lens_mode == "remove" and "LensMake" in actual:
-        mismatches.append("未清除 LensMake")
-    all_tags = json.loads(exiftool("-j", "-G1", "-a", "-n", str(output)))[0]
-    forbidden = ("MakerNotes:", "Sony:", "Canon:", "Nikon:", "FujiFilm:", "Panasonic:", "JUMBF:", "C2PA:")
-    if any(k.startswith(forbidden) or k.endswith(":MakerNote") for k in all_tags):
-        mismatches.append("发现厂商 MakerNote 或 C2PA 数据")
-    with Image.open(output) as image:
-        image.load()
-        if image.size != size or not image.info.get("icc_profile"):
-            mismatches.append("图像尺寸或 sRGB ICC 验证失败")
-    if mismatches:
-        raise RuntimeError("元数据校验失败：" + "; ".join(mismatches))
-    return actual
-
-
-def reserve_output(folder: Path, stem: str) -> Path:
-    folder.mkdir(parents=True, exist_ok=True)
-    index = 0
-    while True:
-        suffix = f"_{index}" if index else ""
-        path = folder / f"{stem}{suffix}.jpg"
-        if path.with_suffix(".jpg.json").exists():
-            index += 1
-            continue
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-            os.close(fd)
-            return path
-        except FileExistsError:
-            index += 1
 
 
 def crop_bounds(size: tuple[int, int], box: tuple[float, float, float, float]):

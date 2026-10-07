@@ -3,6 +3,12 @@
 一个本地桌面照片桥接工具：**RAW / JPEG → 高质量 sRGB JPEG → Leica 身份 EXIF**。
 默认目标身份为 `LEICA M11-P`，可切换其他 Leica 机型，用于在 Leica FOTOS 中测试 Leica Looks。照片在本地处理，原文件保持不变。
 
+## darktable 导出插件
+
+也可在 darktable 的 **Leica EXIF** 面板启用后处理，使用原生“磁盘上的文件”目标、路径模板和重名规则导出，由 darktable 负责开发与编辑，插件覆写并校验导出 JPEG/HEIF 的元数据，不重新压缩。macOS 安装与使用见 [插件说明](docs/darktable-plugin.md)。现有桌面应用继续保留。
+
+用户已实测确认 **HEIF + Rec.709 兼容 Leica FOTOS**；具体测试范围见 [验证记录](docs/darktable-validation.md)。
+
 ## 功能概览
 
 | 功能 | 当前支持 |

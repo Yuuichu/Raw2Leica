@@ -1,3 +1,6 @@
 include Launch.command
 recursive-include scripts *.py *.sh
 recursive-include docs *.md
+recursive-include darktable *.lua
+recursive-include tests/lua *.lua
+recursive-include tests/fixtures *.icc
